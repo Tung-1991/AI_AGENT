@@ -1,4 +1,4 @@
-# new.py - Phiên bản tối ưu hoá của Hoàng Đế: RAG + Entity Memory + LLM client + Session Memory + Encoding Fix
+# new.py - Bản tối ưu hoá hoàn chỉnh: RAG + Entity Memory + Auto Entity Buffer + LLM client + Session Memory + Auto-Summary
 
 import os
 import json
@@ -17,6 +17,7 @@ TMP_DIR = os.path.join(os.getcwd(), "tmp")
 HISTORY_DIR = os.path.join(TMP_DIR, "chat_history")
 ENTITY_DB = os.path.join(TMP_DIR, "entities_all.json")
 ENTITY_TMP = os.path.join(TMP_DIR, "entities.json")
+AUTO_ENTITY_DIR = os.path.join(TMP_DIR, "auto")
 LOG_FILE = os.path.join(TMP_DIR, "llm_server.log")
 MODEL_PATH = os.path.expanduser("~/AIagent/models/llm/llama-3-13b-instruct.Q4_K_M.gguf")
 PORT = 8000
@@ -26,6 +27,7 @@ TOKEN_PER_CHAR = 4
 ENTITY_THRESHOLD = 3
 MAX_ENTITIES = 5
 KEYWORDS = ["nginxA", "Hoàng"]
+AUTO_ENTITY_LIMIT = 10000
 
 # ===================== GLOBAL STATE =====================
 HISTORY = []
@@ -47,13 +49,11 @@ def load_vector_engine():
 def retrieve_context(query, top_k=3):
     if not embed_model or not faiss_index or not chunk_map:
         return ""
-
     vec = embed_model.encode([query])
     faiss.normalize_L2(vec)
     scores, ids = faiss_index.search(np.array(vec).astype("float32"), top_k)
 
-    chunks = []
-    seen = set()
+    chunks, seen = [], set()
     for i, score in zip(ids[0], scores[0]):
         idx = str(i)
         if idx in chunk_map:
@@ -64,22 +64,19 @@ def retrieve_context(query, top_k=3):
     return "\n".join(chunks)
 
 # ===================== ENTITY MEMORY =====================
-def normalize(text):
-    return re.sub(r"\s+", " ", text.strip().lower())
-
-def extract_entities(history):
+def extract_all_phrases(history):
     counter = Counter()
     for msg in history:
         if msg["role"] == "user":
             phrases = re.findall(r'([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)', msg["content"])
             for ph in phrases:
                 counter[ph] += 1
-    return {k: v for k, v in counter.items() if v >= ENTITY_THRESHOLD and k not in KEYWORDS}
+    return counter
 
-def update_entity_memory(new_ents):
+def update_entity_memory(hot_entities):
     os.makedirs(TMP_DIR, exist_ok=True)
     with open(ENTITY_TMP, "w", encoding="utf-8") as f:
-        json.dump(new_ents, f, ensure_ascii=False, indent=2)
+        json.dump(hot_entities, f, ensure_ascii=False, indent=2)
 
     if os.path.exists(ENTITY_DB):
         with open(ENTITY_DB, "r", encoding="utf-8") as f:
@@ -87,11 +84,21 @@ def update_entity_memory(new_ents):
     else:
         all_ents = {}
 
-    for k, v in new_ents.items():
+    for k, v in hot_entities.items():
         all_ents[k] = all_ents.get(k, 0) + v
 
     with open(ENTITY_DB, "w", encoding="utf-8") as f:
         json.dump(all_ents, f, ensure_ascii=False, indent=2)
+
+def save_warm_entities(all_phrases):
+    os.makedirs(AUTO_ENTITY_DIR, exist_ok=True)
+    warm = {k: v for k, v in all_phrases.items() if 0 < v < ENTITY_THRESHOLD and k not in KEYWORDS}
+    if warm:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(AUTO_ENTITY_DIR, f"auto_entity_{ts}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(warm, f, ensure_ascii=False, indent=2)
+        print(f"🧾 Ghi {len(warm)} entity sơ bộ vào {path}")
 
 def top_entities(n=MAX_ENTITIES):
     if not os.path.exists(ENTITY_DB):
@@ -126,6 +133,29 @@ def build_prompt(user_input):
         )
     }
 
+def summarize_session(history):
+    if not history:
+        return ""
+    content = "\n".join([f"{m['role']}: {m['content']}" for m in history if m["role"] in ("user", "assistant")][-10:])
+    payload = {
+        "model": os.path.basename(MODEL_PATH),
+        "messages": [
+            {"role": "system", "content": "Tóm tắt ngắn gọn nội dung cuộc hội thoại sau (5 dòng hoặc ít hơn, rõ ràng, súc tích):"},
+            {"role": "user", "content": content}
+        ],
+        "max_tokens": 200,
+        "temperature": 0.3,
+    }
+    try:
+        res = requests.post(
+            f"http://localhost:{PORT}/v1/chat/completions",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        )
+        return res.json()["choices"][0]["message"]["content"].strip()
+    except:
+        return "Không tóm tắt được."
+
 def call_llm(user_input):
     global HISTORY
     user_input = user_input.encode("utf-8", "ignore").decode("utf-8")
@@ -151,7 +181,12 @@ def call_llm(user_input):
         res.raise_for_status()
         reply = res.json()["choices"][0]["message"]["content"].strip()
         HISTORY.append({"role": "assistant", "content": reply})
-        update_entity_memory(extract_entities(HISTORY))
+
+        all_phrases = extract_all_phrases(HISTORY)
+        hot = {k: v for k, v in all_phrases.items() if v >= ENTITY_THRESHOLD and k not in KEYWORDS}
+        update_entity_memory(hot)
+        save_warm_entities(all_phrases)
+
         print(f"📊 Tokens hiện tại: ~{estimate_tokens([sys_prompt] + HISTORY)} / 8192")
         return reply
     except Exception as e:
@@ -166,7 +201,14 @@ def save_history():
         path = os.path.join(HISTORY_DIR, filename)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(HISTORY, f, ensure_ascii=False, indent=2)
+
+        summary = summarize_session(HISTORY)
+        with open(path + ".summary.txt", "w", encoding="utf-8") as f:
+            f.write(summary)
+
         print(f"📁 Đã lưu lịch sử tại: {path}")
+        print("📝 Tóm tắt session:")
+        print(summary)
 
 def select_history_file():
     if not os.path.exists(HISTORY_DIR):
@@ -174,9 +216,15 @@ def select_history_file():
     files = sorted(f for f in os.listdir(HISTORY_DIR) if f.endswith(".json"))
     if not files:
         return None
+
     print("📂 Danh sách file lịch sử:")
     for i, f in enumerate(files):
         print(f"  [{i}] {f}")
+        summary_path = os.path.join(HISTORY_DIR, f + ".summary.txt")
+        if os.path.exists(summary_path):
+            with open(summary_path, "r", encoding="utf-8") as sf:
+                print("     📝", sf.read().strip())
+
     choice = input("🔢 Chọn số file để load (hoặc Enter bỏ qua): ").strip()
     if not choice:
         return None

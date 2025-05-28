@@ -1,12 +1,19 @@
-# Bỏ thư mục ảo
-venv3/
+# Bỏ hết file bên trong nhưng giữ thư mục
+data/*
+!data/.keep
+
+models/*
+!models/.keep
+
+tmp/*
+!tmp/.keep
+
+venv3/*
+!venv3/.keep
+
+# File rác khác
 __pycache__/
 *.pyc
-
-# Bỏ cache tạm
-tmp/
 *.log
-
-# Bỏ file tạm cá nhân nếu có
 *.swp
 *.bak
