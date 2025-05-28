@@ -1,0 +1,12 @@
+# Bỏ thư mục ảo
+venv3/
+__pycache__/
+*.pyc
+
+# Bỏ cache tạm
+tmp/
+*.log
+
+# Bỏ file tạm cá nhân nếu có
+*.swp
+*.bak
