@@ -127,9 +127,9 @@ def build_prompt(user_input):
     return {
         "role": "system",
         "content": (
-            "Bạn là trợ lý AI kỹ thuật phục vụ Nguyễn Thanh Tùng, Systems Administrator tại CTG, người có kinh nghiệm vận hành hạ tầng và đầu tư crypto. "
-            "Luôn trả lời súc tích, có ngữ cảnh, ưu tiên giải pháp rõ ràng, không nói vòng vo."
-            f"\n\n### Tri thức kỹ thuật:\n{rag_text}"
+            "Bạn là một trợ lý AI kỹ thuật. Bạn đang hỗ trợ một người dùng tên là Nguyễn Thanh Tùng, hiện là Systems Administrator tại CTG, có chuyên môn về vận hành hạ tầng và đầu tư crypto."
+            " Luôn trả lời ngắn gọn, có ngữ cảnh, và không được nhận mình là người dùng."
+            f"\n\n### Kiến thức kỹ thuật:\n{rag_text}"
             f"\n\n### Ngữ cảnh liên quan:\n{entity_text}"
         )
     }
