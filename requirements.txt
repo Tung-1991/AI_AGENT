@@ -71,3 +71,5 @@ typing_extensions==4.13.2
 urllib3==2.4.0
 uvicorn==0.34.2
 wcwidth==0.2.13
+sentencepiece==0.2.0
+protobuf==4.25.3

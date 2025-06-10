@@ -13,7 +13,7 @@ llm = Llama(
 
 messages = [
     {"role": "system",
-     "content": "Tôi tên là tùng làm ở Vietinbank, thích kiếm tiền đầu tư COIN và quen nhiều cô gái xinh đẹp, bạn có lời nào cho tôi về công việc hay kiểm tiền ko."},
+     "content": "Tôi tên là tùng làm ở CTG."},
     {"role": "user", "content": "Xin chào!"}
 ]
 
