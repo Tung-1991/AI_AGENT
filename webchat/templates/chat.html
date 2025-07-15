@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div>
+                <h2>AI Agent (User: <strong>{{ username }}</strong>)</h2>
+                <span id="session-name-display" class="session-name">Phiên: {{ session_id }}</span>
+            </div>
+            <div class="header-buttons">
+                <button id="newSessionBtn">Phiên Mới</button>
+                <button id="saveSessionBtn">Lưu Phiên</button>
+                <button id="ragSaveBtn">Góp ý RAG</button>
+                <button id="historyBtn">Lịch sử</button>
+                <a href="/logout">Đăng xuất</a>
+            </div>
+        </div>
+        <div id="chat-box" class="chat-box">
+            <div class="message ai-message"><strong>AI:</strong> Chào bạn, tôi có thể giúp gì cho bạn hôm nay?</div>
+        </div>
+        <div class="chat-footer">
+            <span id="token-counter">Tokens: ~0 / 8192</span>
+        </div>
+        <div class="chat-input-area">
+            <textarea id="userInput" placeholder="Nhập câu hỏi của bạn ở đây..."></textarea>
+            <button id="sendBtn">Gửi</button>
+        </div>
+    </div>
+
+    <div id="historyModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn">&times;</span>
+            <h2>Lịch sử phiên chat</h2>
+            <div id="historyList"></div>
+        </div>
+    </div>
+
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const newSessionBtn = document.getElementById('newSessionBtn');
+        const saveSessionBtn = document.getElementById('saveSessionBtn');
+        const ragSaveBtn = document.getElementById('ragSaveBtn');
+        const historyBtn = document.getElementById('historyBtn');
+        const historyModal = document.getElementById('historyModal');
+        const historyList = document.getElementById('historyList');
+        const closeBtn = document.querySelector('.close-btn');
+        const tokenCounter = document.getElementById('token-counter');
+        const sessionNameDisplay = document.getElementById('session-name-display');
+
+        function addMessage(sender, text) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', sender === 'user' ? 'user-message' : 'ai-message');
+            const formattedText = text.replace(/\n/g, '<br>');
+            messageElement.innerHTML = `<strong>${sender === 'user' ? 'Bạn' : 'AI'}:</strong> ${formattedText}`;
+            chatBox.appendChild(messageElement);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const messageText = userInput.value.trim();
+            if (messageText === '') return;
+
+            addMessage('user', messageText);
+            userInput.value = '';
+            userInput.focus();
+
+            const thinkingMessage = document.createElement('div');
+            thinkingMessage.classList.add('message', 'ai-message');
+            thinkingMessage.innerHTML = '<strong>AI:</strong> Đang suy nghĩ...';
+            chatBox.appendChild(thinkingMessage);
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: messageText })
+                });
+
+                chatBox.removeChild(thinkingMessage);
+
+                if (!response.ok) throw new Error('Lỗi mạng hoặc server.');
+
+                const data = await response.json();
+                addMessage('ai', data.reply);
+                tokenCounter.textContent = `Tokens: ~${data.token_count} / 8192`;
+            } catch (error) {
+                chatBox.removeChild(thinkingMessage);
+                addMessage('ai', 'Lỗi: ' + error.message);
+            }
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        userInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }
+        });
+
+        newSessionBtn.addEventListener('click', async () => {
+            await fetch('/new_session', { method: 'POST' });
+            chatBox.innerHTML = '';
+            addMessage('ai', 'Đã bắt đầu phiên chat mới.');
+            tokenCounter.textContent = 'Tokens: ~0 / 8192';
+            sessionNameDisplay.textContent = 'Phiên: Phiên Mới'; // Reset session name display
+        });
+
+        saveSessionBtn.addEventListener('click', async () => {
+            let name = "";
+            // Chỉ hỏi tên nếu là phiên mới hoặc chưa có tên cụ thể
+            if (sessionNameDisplay.textContent.includes("Phiên: Phiên Mới") || sessionNameDisplay.textContent.includes("Phiên: current_session")) {
+                name = prompt("Nhập tên cho phiên chat mới:", "");
+                if (name === null) return;
+            }
+            
+            const response = await fetch('/save_session', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_name: name })
+            });
+            const data = await response.json();
+            if (data.status === 'success' && data.new_session_id) {
+                sessionNameDisplay.textContent = `Phiên: ${data.new_session_id}`;
+            }
+            alert(data.message);
+        });
+
+        ragSaveBtn.addEventListener('click', async () => {
+            if (confirm('Bạn có chắc muốn gửi phiên chat này để làm tài liệu cho AI học không?')) {
+                const response = await fetch('/rag_save', { method: 'POST' });
+                const data = await response.json();
+                alert(data.message);
+            }
+        });
+
+        async function renderHistoryList() {
+            try {
+                const response = await fetch('/history/list');
+                if (!response.ok) throw new Error('Không thể tải lịch sử');
+                const sessions = await response.json();
+                historyList.innerHTML = '';
+                if (sessions.length > 0) {
+                    sessions.forEach(id => {
+                        const item = document.createElement('div');
+                        item.className = 'history-item';
+                        item.innerHTML = `
+                            <span class="history-name">${id}</span>
+                            <div class="history-actions">
+                                <button class="rename-btn" data-id="${id}">Đổi tên</button>
+                                <button class="delete-btn" data-id="${id}">Xóa</button>
+                            </div>
+                        `;
+                        item.querySelector('.history-name').addEventListener('click', () => loadSession(id));
+                        item.querySelector('.rename-btn').addEventListener('click', (e) => {e.stopPropagation(); renameSession(id);});
+                        item.querySelector('.delete-btn').addEventListener('click', (e) => {e.stopPropagation(); deleteSession(id);});
+                        historyList.appendChild(item);
+                    });
+                } else {
+                    historyList.innerHTML = '<div>Không có lịch sử nào.</div>';
+                }
+            } catch (error) {
+                alert('Lỗi: ' + error.message);
+            }
+        }
+
+        historyBtn.addEventListener('click', () => {
+            renderHistoryList();
+            historyModal.style.display = 'block';
+        });
+
+        async function loadSession(sessionId) {
+            const response = await fetch('/history/load', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId })
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                chatBox.innerHTML = '';
+                let totalTokens = 0;
+                data.history.forEach(msg => {
+                    addMessage(msg.role, msg.content);
+                    totalTokens += Math.ceil((msg.content || '').length / 4);
+                });
+                tokenCounter.textContent = `Tokens: ~${totalTokens} / 8192`;
+                sessionNameDisplay.textContent = `Phiên: ${data.session_id}`;
+                historyModal.style.display = 'none';
+            } else { alert('Lỗi khi tải phiên chat.'); }
+        }
+
+        async function deleteSession(sessionId) {
+            if (confirm(`Bạn có chắc muốn xóa vĩnh viễn phiên "${sessionId}" không?`)) {
+                await fetch('/history/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                renderHistoryList();
+                // If the deleted session was the current one, reset to a new session
+                if (sessionNameDisplay.textContent.includes(sessionId)) {
+                    await fetch('/new_session', { method: 'POST' });
+                    chatBox.innerHTML = '';
+                    addMessage('ai', 'Đã bắt đầu phiên chat mới.');
+                    tokenCounter.textContent = 'Tokens: ~0 / 8192';
+                    sessionNameDisplay.textContent = 'Phiên: Phiên Mới';
+                }
+            }
+        }
+
+        async function renameSession(oldId) {
+            const newName = prompt(`Nhập tên mới cho phiên "${oldId}":`, oldId);
+            if (newName && newName.trim() !== "" && newName !== oldId) { // Check if newName is different from oldId
+                const response = await fetch('/history/rename', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ old_id: oldId, new_name: newName })
+                });
+                const data = await response.json();
+                if (data.status === 'success') {
+                    if (sessionNameDisplay.textContent.includes(oldId)) {
+                        sessionNameDisplay.textContent = `Phiên: ${newName}`;
+                    }
+                    alert(data.message);
+                } else {
+                    alert('Lỗi: ' + data.error);
+                }
+                renderHistoryList();
+            }
+        }
+        
+        closeBtn.onclick = () => { historyModal.style.display = 'none'; };
+        window.onclick = (event) => {
+            if (event.target == historyModal) {
+                historyModal.style.display = 'none';
+            }
+        };
+
+        // Initialize session name on page load if applicable
+        if ("{{ session_id }}" && "{{ session_id }}" !== "None") {
+            sessionNameDisplay.textContent = `Phiên: {{ session_id }}`;
+        } else {
+            sessionNameDisplay.textContent = 'Phiên: Phiên Mới';
+        }
+    </script>
+</body>
+</html>

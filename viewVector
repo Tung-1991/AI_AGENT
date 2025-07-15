@@ -1,1 +1,0 @@
-python -c "import faiss; index = faiss.read_index('./data/processed/index.faiss'); print('Số vector đã lưu:', index.ntotal)"
