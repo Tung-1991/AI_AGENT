@@ -1,3 +1,4 @@
+pytz
 waitress
 Flask
 annotated-types==0.7.0

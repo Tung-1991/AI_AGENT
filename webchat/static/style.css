@@ -1,4 +1,4 @@
-/* General Body Styles */
+/* --- Cài đặt chung --- */
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     background-color: #f0f2f5;
@@ -9,7 +9,7 @@ body {
     height: 100vh;
 }
 
-/* Chat Container */
+/* --- Khung Chat chính --- */
 .chat-container {
     width: 90%;
     max-width: 800px;
@@ -21,7 +21,7 @@ body {
     flex-direction: column;
 }
 
-/* Chat Header */
+/* --- Header --- */
 .chat-header {
     background: #4a4a4a;
     color: white;
@@ -33,7 +33,9 @@ body {
     align-items: center;
 }
 .chat-header h2 { margin: 0; font-size: 1.1em; }
-.chat-header a, .header-buttons button {
+.session-name { font-size: 0.8em; color: #d1d1d1; display: block; margin-top: 4px; }
+
+.header-buttons button, .header-buttons a {
     color: #fff;
     text-decoration: none;
     background: #6c757d;
@@ -43,17 +45,17 @@ body {
     cursor: pointer;
     margin-left: 10px;
     font-size: 0.9em;
+    font-family: inherit; /* Đảm bảo font chữ nhất quán */
 }
 .header-buttons button:hover, .chat-header a:hover {
     background: #5a6268;
 }
 
-/* Chat Box */
+/* --- Khung hiển thị tin nhắn --- */
 .chat-box {
     flex-grow: 1;
     overflow-y: auto;
     padding: 20px;
-    border-bottom: 1px solid #ddd;
     display: flex;
     flex-direction: column;
 }
@@ -78,29 +80,30 @@ body {
     border-bottom-left-radius: 5px;
 }
 .message strong {
-    display: block;
-    margin-bottom: 5px;
-    font-size: 0.9em;
+    display: inline; /* Hiển thị tên trên cùng một dòng với tin nhắn */
+    margin-right: 5px;
 }
 
-/* Chat Input Area */
+/* --- Khung nhập liệu --- */
 .chat-input-area {
     display: flex;
     padding: 15px;
     border-top: 1px solid #eee;
+    background-color: #f8f9fa;
 }
-textarea {
+textarea#userInput {
     flex-grow: 1;
     border: 1px solid #ddd;
     border-radius: 20px;
-    padding: 12px 18px;
+    padding: 10px 18px;
     font-size: 16px;
     resize: none;
-    height: 26px;
+    height: 24px; /* Điều chỉnh chiều cao ban đầu */
     max-height: 120px;
     overflow-y: auto;
+    line-height: 1.5;
 }
-textarea:focus {
+textarea#userInput:focus {
     outline: none;
     border-color: #007bff;
 }
@@ -113,47 +116,26 @@ textarea:focus {
     margin-left: 10px;
     cursor: pointer;
     font-size: 16px;
-    transition: background-color 0.2s;
 }
 #sendBtn:hover { background-color: #0056b3; }
 
-/* Login Page Styles */
-.login-container {
-    background: white;
-    padding: 40px;
-    text-align: center;
-    border-radius: 8px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-.login-container input {
-    display: block;
-    width: 300px;
-    margin: 15px auto;
-    padding: 12px;
-    font-size: 16px;
-    border: 1px solid #ccc;
-    border-radius: 5px;
-}
-.login-container button {
-    width: 324px;
-    background: #007bff;
-    color: white;
-    border: none;
-    padding: 12px;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 16px;
+/* --- Footer (chứa Token Counter) --- */
+.chat-footer {
+    padding: 5px 20px;
+    background-color: #f8f9fa;
+    text-align: right;
+    font-size: 0.8em;
+    color: #6c757d;
+    border-top: 1px solid #eee;
 }
 
-/* History Modal Styles */
+/* --- Cửa sổ Lịch sử (Modal) --- */
 .modal {
     display: none;
     position: fixed;
     z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
+    left: 0; top: 0;
+    width: 100%; height: 100%;
     overflow: auto;
     background-color: rgba(0,0,0,0.5);
 }
@@ -165,65 +147,12 @@ textarea:focus {
     width: 60%;
     max-width: 600px;
     border-radius: 8px;
-    animation: fadeIn 0.3s;
 }
-@keyframes fadeIn {
-    from {opacity: 0;}
-    to {opacity: 1;}
-}
-.close-btn {
-    color: #aaa;
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
-}
-.close-btn:hover,
-.close-btn:focus {
-    color: black;
-    text-decoration: none;
-    cursor: pointer;
-}
-/* historyList is now a div, not a ul */
-#historyList {
-    /* list-style-type: none; Remove this as it's not a ul */
-    padding: 0;
-    max-height: 400px;
-    overflow-y: auto;
-}
-/* Remove li specific styles if they conflict with new .history-item */
-/* #historyList li {
-    padding: 12px;
-    border-bottom: 1px solid #ddd;
-    cursor: pointer;
-    transition: background-color 0.2s;
-}
-#historyList li:last-child {
-    border-bottom: none;
-}
-#historyList li:hover {
-    background-color: #f1f1f1;
-} */
+.close-btn { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+.close-btn:hover { color: black; }
+#historyList { max-height: 400px; overflow-y: auto; }
 
-
-/* Styles for the token counter in the chat footer */
-.chat-footer {
-    padding: 5px 20px;
-    background-color: #f8f9fa;
-    border-top: 1px solid #eee;
-    text-align: right;
-    font-size: 0.8em;
-    color: #6c757d;
-}
-
-/* Styles for the session name display */
-.session-name {
-    font-size: 0.8em;
-    color: #d1d1d1;
-    display: block;
-    margin-top: 4px;
-}
-
-/* Styles for history list items (replacing old #historyList li) */
+/* --- Các mục trong Lịch sử --- */
 .history-item {
     display: flex;
     justify-content: space-between;
@@ -231,17 +160,11 @@ textarea:focus {
     padding: 12px;
     border-bottom: 1px solid #ddd;
 }
-.history-item:last-child {
-    border-bottom: none;
-}
-.history-name {
-    cursor: pointer;
-    font-weight: 500;
-    flex-grow: 1; /* Allows the name to take available space */
-}
-.history-name:hover {
-    color: #007bff;
-}
+.history-item:last-child { border-bottom: none; }
+.history-item-info { display: flex; flex-direction: column; flex-grow: 1; cursor: pointer; }
+.history-item-info:hover .history-name { color: #007bff; }
+.history-name { font-weight: 500; }
+.timestamp { font-size: 0.8em; color: #777; margin-top: 4px; }
 .history-actions button {
     margin-left: 8px;
     padding: 4px 8px;
@@ -249,21 +172,66 @@ textarea:focus {
     border-radius: 4px;
     border: 1px solid #ccc;
     cursor: pointer;
-    /* Basic button styling, consider adding hover effects */
 }
-.history-actions .rename-btn {
-    background-color: #ffc107; /* Yellow */
-    border-color: #ffc107;
-    color: #333; /* Darker text for contrast */
+.history-actions .rename-btn { background-color: #ffc107; border-color: #ffc107; color: #333; }
+.history-actions .rename-btn:hover { background-color: #e0a800; }
+.history-actions .delete-btn { background-color: #dc3545; border-color: #dc3545; color: white; }
+.history-actions .delete-btn:hover { background-color: #c82333; }
+
+
+/* --- THÊM VÀO CUỐI FILE STYLE.CSS --- */
+
+/* --- Style cho trang đăng nhập --- */
+.login-container {
+    background: white;
+    padding: 40px 50px;
+    text-align: center;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    width: 100%;
+    max-width: 400px;
 }
-.history-actions .rename-btn:hover {
-    background-color: #e0a800;
+
+.login-container h2 {
+    margin-top: 0;
+    margin-bottom: 30px;
+    color: #333;
 }
-.history-actions .delete-btn {
-    background-color: #dc3545; /* Red */
-    border-color: #dc3545;
+
+.login-container form input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box; /* Quan trọng để padding không làm vỡ layout */
+    margin-bottom: 15px;
+    padding: 14px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.login-container form button {
+    width: 100%;
+    background: #007bff;
     color: white;
+    border: none;
+    padding: 14px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    transition: background-color 0.2s;
 }
-.history-actions .delete-btn:hover {
-    background-color: #c82333;
+
+.login-container form button:hover {
+    background-color: #0056b3;
+}
+
+/* Style cho thông báo lỗi (nếu có) */
+.error {
+    color: #dc3545; /* Màu đỏ */
+    background-color: #f8d7da; /* Nền hồng nhạt */
+    border: 1px solid #f5c6cb;
+    padding: 10px;
+    border-radius: 5px;
+    margin-top: 20px;
 }
