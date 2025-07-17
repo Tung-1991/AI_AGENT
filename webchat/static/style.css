@@ -129,16 +129,6 @@ textarea#userInput:focus {
     border-top: 1px solid #eee;
 }
 
-/* --- Cửa sổ Lịch sử (Modal) --- */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0; top: 0;
-    width: 100%; height: 100%;
-    overflow: auto;
-    background-color: rgba(0,0,0,0.5);
-}
 .modal-content {
     background-color: #fefefe;
     margin: 10% auto;
@@ -234,4 +224,26 @@ textarea#userInput:focus {
     padding: 10px;
     border-radius: 5px;
     margin-top: 20px;
+}
+
+/* style.css - Thêm vào cuối */
+
+/* Style cho Curation Modal */
+#curationModal .modal-dialog {
+    max-width: 1140px; /* Rộng hơn để chứa 2 cột */
+}
+
+#curationModal label {
+    font-weight: 500;
+    color: #333;
+}
+
+#curationModal hr {
+    margin-top: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+#hosts-container .input-group-append button {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
 }

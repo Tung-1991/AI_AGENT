@@ -2,38 +2,28 @@
 import os
 from sentence_transformers import SentenceTransformer
 
-def download_embedding_model():
-    """
-    Kiểm tra và tải model embedding (bkai-foundation-models/vietnamese-bi-encoder)
-    vào đúng thư mục 'models/embed' của dự án.
-    """
-    # --- Cấu hình ---
-    model_name = "bkai-foundation-models/vietnamese-bi-encoder"
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    model_path = os.path.join(base_dir, "models", "embed")
+# Danh sách các model cần tải
+MODELS = {
+    "vi": "bkai-foundation-models/vietnamese-bi-encoder",
+    "en": "sentence-transformers/all-MiniLM-L6-v2" # Model đa ngôn ngữ mạnh, nhẹ
+}
 
-    # --- Kiểm tra xem model đã tồn tại chưa ---
-    config_file_path = os.path.join(model_path, "config.json")
-    if os.path.exists(config_file_path):
-        print(f"✅ Model đã tồn tại tại: {model_path}")
-        print("👍 Bỏ qua bước tải về.")
-        return
+base_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # --- Tải và lưu model nếu chưa có ---
-    print(f"🔍 Không tìm thấy model. Bắt đầu tải '{model_name}'...")
-    try:
-        # Tạo thư mục nếu nó chưa tồn tại
-        os.makedirs(model_path, exist_ok=True)
-        
-        # Tải model
+def download_and_save(model_name, save_dir):
+    if os.path.exists(os.path.join(save_dir, "modules.json")):
+        print(f"✅ Model '{model_name}' đã tồn tại tại: {save_dir}")
+    else:
+        print(f"🔍 Bắt đầu tải và lưu model '{model_name}'...")
+        os.makedirs(save_dir, exist_ok=True)
         model = SentenceTransformer(model_name)
-        
-        # Lưu model vào đường dẫn đã định
-        model.save(model_path)
-        
-        print(f"✅ Đã tải và lưu model thành công vào: {model_path}")
-    except Exception as e:
-        print(f"❌ Đã xảy ra lỗi khi tải model: {e}")
+        model.save(save_dir)
+        print(f"✅ Đã tải model '{model_name}' thành công tại: {save_dir}")
 
 if __name__ == "__main__":
-    download_embedding_model()
+    print("--- Bắt đầu kiểm tra và tải các model embedding ---")
+    for lang_code, model_name in MODELS.items():
+        # Đổi tên thư mục lưu để phân biệt
+        model_path = os.path.join(base_dir, "models", f"embed_{lang_code}")
+        download_and_save(model_name, model_path)
+    print("--- Hoàn tất quá trình tải model ---")

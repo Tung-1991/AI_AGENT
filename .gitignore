@@ -17,3 +17,5 @@ __pycache__/
 *.log
 *.swp
 *.bak
+
+python_packages/*
