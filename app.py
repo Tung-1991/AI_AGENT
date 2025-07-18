@@ -55,10 +55,14 @@ log_file_app = os.path.join(LOG_DIR, "app.log")
 handler = TimedRotatingFileHandler(log_file_app, when="midnight", interval=1, backupCount=14)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s [in %(pathname)s:%(lineno)d]')
 handler.setFormatter(formatter)
+
+# THAY ĐỔI QUAN TRỌNG: Thêm force=True để ghi đè mọi cấu hình log đã có
 logging.basicConfig(
     handlers=[handler, logging.StreamHandler()],
-    level=logging.INFO
+    level=logging.INFO,
+    force=True  # <-- THAY ĐỔI TẠI ĐÂY
 )
+
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 logging.getLogger('waitress').disabled = True
 
@@ -258,7 +262,7 @@ def get_ai_response(user_input, chat_history):
     while current_tokens > CONTEXT_LIMIT and len(temp_history) > 1:
         temp_history.pop(0); temp_history.pop(0) # Remove both user and assistant messages
         messages = [{"role": "system", "content": system_prompt}] + temp_history + [{"role": "user", "content": user_input}]
-        current_tokens = sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in final_messages)
+        current_tokens = sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in messages) # Use messages here, not final_messages
 
     session['chat_history'] = temp_history
     reply = call_llm(messages)

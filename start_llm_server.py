@@ -9,7 +9,7 @@ from datetime import datetime
 # --- Cấu hình Server ---
 MODEL_PATH = os.path.expanduser("~/AIagent/models/llm/llama-3-13b-instruct.Q4_K_M.gguf")
 N_GPU_LAYERS = -1
-N_CTX = 4096      # <-- Thêm: Khai báo Context Window cho model
+N_CTX = 8192      # <-- Thêm: Khai báo Context Window cho model
 PORT = 8000
 LOG_DIR = "logs"
 
