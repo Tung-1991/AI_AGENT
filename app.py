@@ -60,7 +60,7 @@ handler.setFormatter(formatter)
 logging.basicConfig(
     handlers=[handler, logging.StreamHandler()],
     level=logging.INFO,
-    force=True  # <-- THAY ĐỔI TẠI ĐÂY
+    force=True
 )
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -311,13 +311,21 @@ def chat_ui():
 
 @app.route('/ask', methods=['POST'])
 def ask():
-    if 'username' not in session: return jsonify({"error": "Not logged in"}), 401
+    # Bỏ qua kiểm tra đăng nhập cho endpoint này
     user_message = request.json['message']
-    chat_history = session.get('chat_history', [])
+    
+    # Nếu là request từ service nội bộ, sẽ không có chat_history trong session
+    # Chúng ta sẽ dùng một chat_history rỗng
+    chat_history = session.get('chat_history', []) 
+    
     reply_content, token_count = get_ai_response(user_message, chat_history)
-    chat_history.append({"role": "user", "content": user_message})
-    chat_history.append({"role": "assistant", "content": reply_content})
-    session['chat_history'] = chat_history
+    
+    # Chỉ cập nhật session nếu người dùng đang đăng nhập (có 'username')
+    if 'username' in session:
+        chat_history.append({"role": "user", "content": user_message})
+        chat_history.append({"role": "assistant", "content": reply_content})
+        session['chat_history'] = chat_history
+        
     return jsonify({"reply": reply_content, "token_count": token_count})
 
 # --- Session & History Management Routes ---
