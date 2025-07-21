@@ -73,7 +73,7 @@ app.secret_key = secrets.token_hex(24)
 
 
 # ===================== CONFIGURATION & GLOBAL STATE =====================
-APP_PORT = 5000
+APP_PORT = 5005
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 USERS_FILE = os.path.join(DATA_DIR, "users", "users.json")

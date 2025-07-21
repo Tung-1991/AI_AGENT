@@ -18,7 +18,7 @@ def call_llm(messages: list, temperature: float = 0.4, max_tokens: int = 4096) -
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "top_p": 0.9
+        #"top_p": 0.9
     }
 
     try:
