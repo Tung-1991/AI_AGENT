@@ -11,7 +11,7 @@ LOCAL_MODEL_NAME = "llama-3-13b-instruct.Q4_K_M.gguf"
 logging.info(f"Local Llama.cpp Client configured for endpoint: {LOCAL_API_ENDPOINT}")
 logging.info(f"Requesting model: {LOCAL_MODEL_NAME}")
 
-def call_llm(messages: list, temperature: float = 0.4, max_tokens: int = 4096) -> str:
+def call_llm(messages: list, temperature: float = 0.4, max_tokens: int = 2048) -> str:
     headers = {"Content-Type": "application/json"}
     payload = {
         "model": LOCAL_MODEL_NAME,

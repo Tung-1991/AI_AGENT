@@ -1,9 +1,12 @@
 # FILE: app.py
-# VERSION: Final & Polished - Merged with improved curation_prompt and new RAG fields (BILINGUAL & HYBRID SEARCH)
+# VERSION: 5.0 - MERGED - Best of Home (Advanced RAG) & A100 (Detailed Logging)
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.environ['TIKTOKEN_CACHE_DIR'] = os.path.join(BASE_DIR, 'data', 'tiktoken_cache')
 import json
 import hashlib
-import shutil
+import re # <-- Cần cho tìm kiếm
 from datetime import datetime, timedelta
 import secrets
 import logging
@@ -21,13 +24,8 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 # ===================== LỰA CHỌN LLM CLIENT (FIX CỨNG) =====================
-
-# ---------------------------------------------------------------------
-# THAY ĐỔI DUY NHẤT Ở ĐÂY KHI CHUYỂN MÔI TRƯỜNG
-#
 # Đặt thành True khi chạy trên A100 (dùng vLLM).
 # Đặt thành False khi chạy ở máy nhà (dùng llama-cpp).
-#
 IS_PRODUCTION_ENVIRONMENT = False
 # ---------------------------------------------------------------------
 
@@ -46,8 +44,6 @@ else:
         logging.error("❌ Lỗi: Không tìm thấy file llm_client.py.")
         exit()
 
-# =====================================================================
-
 # ===================== CẤU HÌNH LOGGING =====================
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -55,22 +51,13 @@ log_file_app = os.path.join(LOG_DIR, "app.log")
 handler = TimedRotatingFileHandler(log_file_app, when="midnight", interval=1, backupCount=14)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s [in %(pathname)s:%(lineno)d]')
 handler.setFormatter(formatter)
-
-# THAY ĐỔI QUAN TRỌNG: Thêm force=True để ghi đè mọi cấu hình log đã có
-logging.basicConfig(
-    handlers=[handler, logging.StreamHandler()],
-    level=logging.INFO,
-    force=True
-)
-
+logging.basicConfig(handlers=[handler, logging.StreamHandler()], level=logging.INFO, force=True)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 logging.getLogger('waitress').disabled = True
-
 
 # ===================== KHỞI TẠO FLASK APP =====================
 app = Flask(__name__, template_folder='webchat/templates', static_folder='webchat/static')
 app.secret_key = secrets.token_hex(24)
-
 
 # ===================== CONFIGURATION & GLOBAL STATE =====================
 APP_PORT = 5005
@@ -80,15 +67,12 @@ USERS_FILE = os.path.join(DATA_DIR, "users", "users.json")
 HISTORY_BASE_DIR = os.path.join(DATA_DIR, "chat_histories")
 RAG_PENDING_DIR = os.path.join(DATA_DIR, "rag_pending")
 VECTOR_STORE_DIR = os.path.join(DATA_DIR, "vector_store")
-
-# --- BILINGUAL PATHS ---
 FAISS_VI_INDEX_PATH = os.path.join(VECTOR_STORE_DIR, "faiss_vi.index")
 FAISS_EN_INDEX_PATH = os.path.join(VECTOR_STORE_DIR, "faiss_en.index")
 CHUNK_MAP_PATH = os.path.join(VECTOR_STORE_DIR, "chunk_map.json")
 EMBED_VI_MODEL_PATH = os.path.join(BASE_DIR, "models", "embed_vi")
 EMBED_EN_MODEL_PATH = os.path.join(BASE_DIR, "models", "embed_en")
 
-# Global variables for models, indexes, and chunk map
 embed_models = {}
 faiss_indexes = {}
 chunk_map = {}
@@ -96,6 +80,13 @@ chunk_map = {}
 TOKEN_PER_CHAR = 4
 CONTEXT_LIMIT = 7000
 VIETNAM_TZ = pytz.timezone('Asia/Ho_Chi_Minh')
+
+# Custom YAML representer for multi-line strings
+def str_presenter(dumper, data):
+  if len(data.splitlines()) > 1:
+    return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+  return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+yaml.add_representer(str, str_presenter)
 
 # ===================== HÀM HỖ TRỢ HỆ THỐNG & BẢO MẬT =====================
 def kill_process_on_port(port):
@@ -118,7 +109,7 @@ def kill_process_on_port(port):
             subprocess.run(cmd, shell=True, check=True)
             logging.info(f"✅ Successfully stopped old process on port {port}.")
     except Exception:
-        pass # Ignore errors if no process is found or command fails
+        pass
 
 def hash_password(password, salt):
     return hashlib.sha256(salt.encode() + password.encode()).hexdigest()
@@ -129,19 +120,19 @@ def check_password(password, salt, stored_hash):
 def sanitize_filename(name):
     return "".join(c for c in name if c.isalnum() or c in (' ', '_', '-')).replace(':', '_').replace('/', '_').replace('\\', '_').strip()
 
-
 # ===================== HÀM LOGIC CỐT LÕI & RAG (HYBRID SEARCH VERSION) =====================
 def load_vector_engine():
     global embed_models, faiss_indexes, chunk_map
     logging.info("Loading Vector Engine (Bilingual Mode)...")
     try:
-        logging.info("Loading Vietnamese embedding model...")
-        embed_models["vi"] = SentenceTransformer(EMBED_VI_MODEL_PATH)
-        logging.info("Loading English/Multilingual embedding model...")
-        embed_models["en"] = SentenceTransformer(EMBED_EN_MODEL_PATH)
+        if os.path.exists(EMBED_VI_MODEL_PATH):
+            logging.info("Loading Vietnamese embedding model...")
+            embed_models["vi"] = SentenceTransformer(EMBED_VI_MODEL_PATH)
+        if os.path.exists(EMBED_EN_MODEL_PATH):
+            logging.info("Loading English/Multilingual embedding model...")
+            embed_models["en"] = SentenceTransformer(EMBED_EN_MODEL_PATH)
         logging.info("✅ Successfully loaded embedding models.")
 
-        # Load both indexes
         if os.path.exists(FAISS_VI_INDEX_PATH):
             try:
                 faiss_indexes["vi"] = faiss.read_index(FAISS_VI_INDEX_PATH)
@@ -169,111 +160,138 @@ def load_vector_engine():
                 chunk_map = json.load(f)
             logging.info(f"✅ Successfully loaded chunk map ({len(chunk_map)} entries).")
         else:
-            logging.warning("⚠️ Chunk map not found. RAG functionality may be limited.")
-            chunk_map = {} # Ensure it's an empty dict if file is missing
-
+            logging.warning("⚠️ Chunk map not found. RAG functionality will be limited.")
+            chunk_map = {}
     except Exception as e:
         logging.error(f"❌ Critical error loading bilingual vector engine: {e}", exc_info=True)
-        embed_models.clear()
-        faiss_indexes.clear()
-        chunk_map.clear()
+        embed_models.clear(); faiss_indexes.clear(); chunk_map.clear()
 
-def retrieve_context(query, top_k=3): # Reduced top_k per language for balanced total
-    if not embed_models or not faiss_indexes or not chunk_map:
-        return "No RAG context available (models/indexes/map not loaded)."
+def retrieve_context(query, top_k=3):
+    if not chunk_map: return []
+    final_results = {}
+    
+    # --- Vector Search with RRF ---
+    if embed_models and faiss_indexes:
+        try:
+            results = {}
+            for lang_code, model in embed_models.items():
+                index = faiss_indexes.get(lang_code)
+                if not index or index.ntotal == 0: continue
+                query_vector = model.encode([query])
+                distances, indices = index.search(np.array(query_vector).astype('float32'), top_k)
+                results[lang_code] = list(zip(indices[0], distances[0]))
+            
+            fused_scores = {}
+            k_rrf = 60
+            for lang_code, lang_results in results.items():
+                for rank, (doc_id, score) in enumerate(lang_results):
+                    doc_id_str = str(doc_id)
+                    if doc_id_str not in fused_scores: fused_scores[doc_id_str] = 0
+                    fused_scores[doc_id_str] += 1 / (k_rrf + rank + 1)
+            
+            reranked_results = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
 
+            for doc_id_str, score in reranked_results[:5]:
+                chunk_package = chunk_map.get(doc_id_str)
+                if not chunk_package: continue
+                source_file = chunk_package.get("metadata", {}).get("source_file", doc_id_str)
+                if source_file not in final_results:
+                    final_results[source_file] = chunk_package
+        except Exception as e:
+            logging.error(f"Lỗi khi truy xuất vector search: {e}")
+
+    # --- Fallback Keyword/IP Search ---
     try:
-        logging.info(f"Starting Hybrid Search for query: '{query[:50]}...'")
+        search_terms = {query.lower()}
+        found_ips = re.findall(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', query)
+        if found_ips:
+            search_terms.update(found_ips)
+        
+        for doc_id_str, chunk_package in chunk_map.items():
+            source_file = chunk_package.get("metadata", {}).get("source_file", doc_id_str)
+            if source_file in final_results: continue # Avoid re-adding
 
-        # === STEP 1 & 2: EMBED AND SEARCH IN PARALLEL ===
-        results = {} # Stores {lang_code: [(doc_id, distance), ...]}
-        for lang_code, model in embed_models.items():
-            index = faiss_indexes.get(lang_code)
-            if not index or index.ntotal == 0:
-                logging.info(f"Skipping search for {lang_code.upper()} as index is not available or empty.")
-                continue
-
-            query_vector = model.encode([query])
-            distances, indices = index.search(np.array(query_vector).astype('float32'), top_k)
-
-            # Store results with original index ID and score
-            results[lang_code] = list(zip(indices[0], distances[0]))
-
-        # === STEP 3: COMBINE AND RE-RANK (Reciprocal Rank Fusion) ===
-        fused_scores = {}
-        # Constant k is often set to 60 in RRF papers
-        k_rrf = 60
-
-        # Iterate over results from each model (vi, en)
-        for lang_code, lang_results in results.items():
-            # Iterate over each chunk in that model's result list
-            for rank, (doc_id, score) in enumerate(lang_results):
-                doc_id_str = str(doc_id)
-                if doc_id_str not in fused_scores:
-                    fused_scores[doc_id_str] = 0
-                # RRF formula: add score based on rank
-                fused_scores[doc_id_str] += 1 / (k_rrf + rank + 1)
-
-        # Sort chunks based on the combined RRF score
-        reranked_results = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
-
-        # === STEP 4: GET FINAL RESULTS ===
-        final_context_items = []
-        # Get the top 5 results after re-ranking
-        for doc_id_str, score in reranked_results[:5]: # Take top 5 from the RRF results
-            chunk_package = chunk_map.get(doc_id_str)
-            if chunk_package and 'content' in chunk_package:
-                final_context_items.append(chunk_package['content'])
-
-        logging.info(f"Retrieved {len(final_context_items)} RAG chunks using Hybrid Search.")
-        return "\n---\n".join(final_context_items) if final_context_items else "No relevant information found in the knowledge base."
-
+            full_text_search = json.dumps(chunk_package, ensure_ascii=False).lower()
+            
+            for term in search_terms:
+                if term in full_text_search:
+                    final_results[source_file] = chunk_package
+                    break 
     except Exception as e:
-        logging.error(f"Error performing Hybrid Search: {e}", exc_info=True)
-        return "Error retrieving RAG context."
+        logging.error(f"Lỗi khi truy xuất fallback search: {e}")
+
+    logging.info(f"Retrieved {len(final_results)} RAG documents using Hybrid Search.")
+    return list(final_results.values())
 
 def get_ai_response(user_input, chat_history):
-    rag_context = retrieve_context(user_input)
+    retrieved_data = retrieve_context(user_input)
+    is_vietnamese = any(char in user_input for char in "àáãạảăằắẵặẳâầấẫậẩđèéẹẻẽêềếễệểìíịỉĩòóọỏõôồốỗộổơờớỡợởùúụủũưừứữựửỳýỵỷỹ")
 
-    # The language detection logic here is for LLM prompt structuring,
-    # not for RAG retrieval anymore. This is fine.
-    is_vietnamese = any(char in user_input for char in "ăâđêôơưĂÂĐÊÔƠƯ")
+    rag_context_str = ""
+    if retrieved_data:
+        context_parts = []
+        # Format for Vietnamese: More readable, human-friendly
+        if is_vietnamese:
+            for item in retrieved_data:
+                meta = item.get("metadata", {})
+                content = item.get("content", "N/A")
+                part = f"""--- Tài liệu: {meta.get("title", "Không rõ")} ---
+- Mã hệ thống: {meta.get("system_code", "Không rõ")}
+- Tags: {', '.join(meta.get("tags", []))}"""
+                if 'hosts' in meta and meta['hosts']:
+                    part += "\n- Các máy chủ liên quan:\n"
+                    for host in meta['hosts']:
+                        part += f"  - Hostname: {host.get('hostname', 'N/A')}, IP: {host.get('ip', 'N/A')}\n"
+                part += f"\n- Nội dung: {content}"
+                context_parts.append(part)
+        # Format for English: YAML-like, structured for technical models
+        else:
+            for item in retrieved_data:
+                metadata_str = yaml.dump(item.get("metadata", {}), allow_unicode=True, indent=2, sort_keys=False)
+                content = item.get("content", "N/A")
+                part = f"---\n{metadata_str}content: |\n  {content}\n---"
+                context_parts.append(part)
+        rag_context_str = "\n\n".join(context_parts)
+    else:
+        rag_context_str = "Không tìm thấy tài liệu nào liên quan."
 
-    # Create dynamic prompt
+    # Create dynamic prompt based on language
     if is_vietnamese:
-        system_prompt = f"""Bạn là trợ lý AI kỹ thuật chuyên nghiệp, hãy trả lời người dùng bằng tiếng Việt kỹ thuật rõ ràng, súc tích và đầy đủ.
+        system_prompt = f"""Mày là một trợ lý AI kỹ thuật chuyên nghiệp. Nhiệm vụ của mày là đọc kỹ <tài_liệu> dưới đây và trả lời câu hỏi của người dùng một cách chính xác.
+Câu trả lời có thể nằm trong phần 'metadata' (như mã hệ thống, hosts, ip) hoặc trong phần 'nội dung'. Hãy suy luận để trả lời.
+TRẢ LỜI BẰNG TIẾNG VIỆT. Nếu không tìm thấy, hãy nói là không tìm thấy.
 
-<thông_tin_bổ_sung>
-{rag_context}
-</thông_tin_bổ_sung>
+<tài_liệu>
+{rag_context_str}
+</tài_liệu>
 """
     else:
-        system_prompt = f"""You are a professional technical AI assistant. Respond in clear, concise English with relevant technical detail.
+        system_prompt = f"""You are a professional technical AI assistant. Your task is to carefully read the <document> below and accurately answer the user's question.
+The answer might be in the 'metadata' (like system_code, hosts, ip) or in the 'content'. Use logical reasoning to answer.
+ANSWER IN ENGLISH. If you cannot find the answer, say so.
 
-<additional_context>
-{rag_context}
-</additional_context>
+<document>
+{rag_context_str}
+</document>
 """
 
-    # Rest of the logic remains the same
+    # Context window management
     temp_history = list(chat_history)
     messages = [{"role": "system", "content": system_prompt}] + temp_history + [{"role": "user", "content": user_input}]
+    
     current_tokens = sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in messages)
     while current_tokens > CONTEXT_LIMIT and len(temp_history) > 1:
-        temp_history.pop(0); temp_history.pop(0) # Remove both user and assistant messages
+        temp_history.pop(0); temp_history.pop(0)
         messages = [{"role": "system", "content": system_prompt}] + temp_history + [{"role": "user", "content": user_input}]
-        current_tokens = sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in messages) # Use messages here, not final_messages
+        current_tokens = sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in messages)
 
-    session['chat_history'] = temp_history
+    if 'username' in session:
+        session['chat_history'] = temp_history
+        
     reply = call_llm(messages)
-    final_messages = messages + [{"role": "assistant", "content": reply}]
-    token_count = sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in final_messages)
-    return reply, token_count
-
+    return reply, sum(len(m.get("content", "")) // TOKEN_PER_CHAR for m in messages + [{"role": "assistant", "content": reply}])
 
 # ===================== FLASK ROUTES =====================
-
-# --- Authentication Routes ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if 'username' in session: return redirect(url_for('chat_ui'))
@@ -283,10 +301,10 @@ def login():
         try:
             with open(USERS_FILE, "r", encoding="utf-8") as f: users = json.load(f)
             user_data = next((u for u in users if u['username'] == username), None)
-            if user_data and 'salt' in user_data and check_password(password, user_data['salt'], user_data['password_hash']):
+            if user_data and check_password(password, user_data.get('salt', ''), user_data.get('password_hash', '')):
                 session['username'] = username
                 session.permanent = True
-                app.permanent_session_lifetime = timedelta(days=7) # Session lasts 7 days
+                app.permanent_session_lifetime = timedelta(days=7)
                 logging.info(f"User '{username}' logged in successfully.")
                 return redirect(url_for('chat_ui'))
             else:
@@ -303,7 +321,6 @@ def logout():
     logging.info(f"User '{username}' logged out.")
     return redirect(url_for('login'))
 
-# --- Core Chat Routes ---
 @app.route('/')
 def chat_ui():
     if 'username' not in session: return redirect(url_for('login'))
@@ -311,16 +328,10 @@ def chat_ui():
 
 @app.route('/ask', methods=['POST'])
 def ask():
-    # Bỏ qua kiểm tra đăng nhập cho endpoint này
     user_message = request.json['message']
-    
-    # Nếu là request từ service nội bộ, sẽ không có chat_history trong session
-    # Chúng ta sẽ dùng một chat_history rỗng
     chat_history = session.get('chat_history', []) 
-    
     reply_content, token_count = get_ai_response(user_message, chat_history)
     
-    # Chỉ cập nhật session nếu người dùng đang đăng nhập (có 'username')
     if 'username' in session:
         chat_history.append({"role": "user", "content": user_message})
         chat_history.append({"role": "assistant", "content": reply_content})
@@ -328,7 +339,6 @@ def ask():
         
     return jsonify({"reply": reply_content, "token_count": token_count})
 
-# --- Session & History Management Routes ---
 @app.route('/new_session', methods=['POST'])
 def new_session_api():
     if 'username' not in session: return jsonify({"error": "Not logged in"}), 401
@@ -341,8 +351,8 @@ def save_session_api():
     if 'username' not in session: return jsonify({"error": "Not logged in"}), 401
     username, chat_history = session['username'], session.get('chat_history', [])
     if not chat_history: return jsonify({"error": "No content to save."}), 400
-    active_id = session.get('active_session_id') # Lấy ID phiên hiện tại từ Flask Session
-    input_name = request.json.get('session_name', '').strip() # Lấy tên phiên mới từ dữ liệu gửi lên
+    active_id = session.get('active_session_id')
+    input_name = request.json.get('session_name', '').strip()
     filename_base = sanitize_filename(input_name) if input_name else (active_id if active_id and active_id != 'New Session' else datetime.now(VIETNAM_TZ).strftime('%Y%m%d_%H%M%S'))
     session['active_session_id'] = filename_base
     user_path = os.path.join(HISTORY_BASE_DIR, username); os.makedirs(user_path, exist_ok=True)
@@ -355,7 +365,7 @@ def save_session_api():
             except json.JSONDecodeError: data['created_at'] = current_time
     else: data['created_at'] = current_time
     with open(filepath, "w", encoding="utf-8") as f: json.dump(data, f, ensure_ascii=False, indent=2)
-    return jsonify({"status": "success", "message": f"Session saved: {filename_base}", "new_session_id": filename_base})
+    return jsonify({"status": "success", "new_session_id": filename_base})
 
 @app.route('/history/list', methods=['GET'])
 def list_history_api():
@@ -382,16 +392,14 @@ def load_history_api():
         session['chat_history'] = data.get('messages', [])
         session['active_session_id'] = session_id
         return jsonify({"status": "success", "history": session['chat_history'], "session_id": session_id})
-    return jsonify({"error": "Chat session not found"}), 404
+    return jsonify({"error": "Not found"}), 404
 
 @app.route('/history/delete', methods=['POST'])
 def delete_history_api():
     if 'username' not in session: return jsonify({"error": "Not logged in"}), 401
     filepath = os.path.join(HISTORY_BASE_DIR, session['username'], f"{request.json['session_id']}.json")
-    if os.path.exists(filepath):
-        os.remove(filepath)
-        return jsonify({"status": "success"})
-    return jsonify({"error": "Chat session not found"}), 404
+    if os.path.exists(filepath): os.remove(filepath)
+    return jsonify({"status": "success"})
 
 @app.route('/history/rename', methods=['POST'])
 def rename_history_api():
@@ -399,26 +407,24 @@ def rename_history_api():
     old_id, new_name = request.json['old_id'], request.json['new_name']
     user_path = os.path.join(HISTORY_BASE_DIR, session['username'])
     sanitized_name = sanitize_filename(new_name)
-    if not sanitized_name: return jsonify({"error": "Invalid new name."}), 400
+    if not sanitized_name: return jsonify({"error": "Invalid name"}), 400
     old_fp, new_fp = os.path.join(user_path, f"{old_id}.json"), os.path.join(user_path, f"{sanitized_name}.json")
-    if os.path.exists(new_fp): return jsonify({"error": "New name already exists."}), 409
+    if os.path.exists(new_fp): return jsonify({"error": "Name exists"}), 409
     if os.path.exists(old_fp):
         os.rename(old_fp, new_fp)
         if session.get('active_session_id') == old_id: session['active_session_id'] = sanitized_name
         return jsonify({"status": "success"})
-    return jsonify({"error": "Chat session not found"}), 404
+    return jsonify({"error": "Not found"}), 404
 
-# --- RAG Knowledge Curation Routes (2-step strategy) ---
 @app.route('/prepare_rag_submission', methods=['POST'])
 def prepare_rag_submission_api():
     if 'username' not in session: return jsonify({"error": "Not logged in"}), 401
     chat_history = session.get('chat_history', [])
-    if len(chat_history) < 2: return jsonify({"error": "Insufficient chat content to summarize."}), 400
+    if len(chat_history) < 2: return jsonify({"error": "Insufficient content"}), 400
     full_conversation = "\n".join([f"{'User' if msg['role'] == 'user' else 'AI'}: {msg['content']}" for msg in chat_history])
-
-    try:
-        # === STEP 1: Extract structured data (Metadata & Action Plan) ===
-        structured_data_prompt = f"""
+    
+    # === STEP 1: Extract structured data (Metadata & Action Plan) ===
+    structured_data_prompt = f"""
 TASK: Extract structured metadata and an actionable plan from a technical conversation.
 INPUT: A conversation.
 OUTPUT: A single, raw JSON object. Do NOT provide any explanation or surrounding text.
@@ -451,33 +457,26 @@ REQUIRED JSON STRUCTURE:
 
 JSON_OUTPUT:
 """
-        messages_step1 = [{"role": "user", "content": structured_data_prompt}]
-        response_step1 = call_llm(messages_step1)
+    messages_step1 = [{"role": "user", "content": structured_data_prompt}]
+    response_step1 = call_llm(messages_step1)
+    
+    structured_data = {}
+    try:
+        json_start = response_step1.find('{')
+        json_end = response_step1.rfind('}') + 1
+        if json_start != -1 and json_end > json_start:
+            structured_data = json.loads(response_step1[json_start:json_end])
+        else:
+            raise json.JSONDecodeError("No valid JSON found", response_step1, 0)
+    except json.JSONDecodeError:
+        logging.error("JSON parsing error in RAG prep step 1. Using fallback structure.")
+        structured_data = {"metadata": {}, "actionable_plan": {}}
 
-        # Parse result from Step 1
-        structured_data = {}
-        try:
-            json_start = response_step1.find('{')
-            json_end = response_step1.rfind('}') + 1
-            if json_start != -1 and json_end > json_start:
-                json_str = response_step1[json_start:json_end]
-                structured_data = json.loads(json_str)
-            else:
-                # If failed, create empty structure
-                raise json.JSONDecodeError("No valid JSON found in step 1 response", response_step1, 0)
-        except json.JSONDecodeError as e:
-            logging.error(f"JSON parsing error in step 1: {e}")
-            structured_data = {
-                "metadata": {"title": "", "system_code": "", "tags": [], "version": "1.0", "related_docs": [], "hosts": []},
-                "actionable_plan": {"alert_summary": "", "investigation_steps": [], "remediation_playbooks": []}
-            }
+    context_title = structured_data.get("metadata", {}).get("title", "N/A")
+    context_tags = ", ".join(structured_data.get("metadata", {}).get("tags", []))
 
-        # === STEP 2: Generate content based on available data ===
-        # Get title and tags from step 1 result for context
-        context_title = structured_data.get("metadata", {}).get("title", "N/A")
-        context_tags = ", ".join(structured_data.get("metadata", {}).get("tags", []))
-
-        content_generation_prompt = f"""
+    # === STEP 2: Generate content based on available data ===
+    content_generation_prompt = f"""
 TASK: You are a senior engineer writing a technical knowledge base article.
 CONTEXT: The article is titled '{context_title}' and is about '{context_tags}'.
 INPUT: A raw conversation.
@@ -490,50 +489,35 @@ CONVERSATION:
 
 SUMMARY_CONTENT:
 """
-        messages_step2 = [{"role": "user", "content": content_generation_prompt}]
-        generated_content = call_llm(messages_step2).strip()
+    messages_step2 = [{"role": "user", "content": content_generation_prompt}]
+    generated_content = call_llm(messages_step2).strip()
 
-        # === COMPILE RESULTS ===
-        final_data = {
-            "metadata": structured_data.get("metadata", {}),
-            "actionable_plan": structured_data.get("actionable_plan", {}),
-            "content": generated_content
-        }
-
-        logging.info("Prepared RAG draft using 2-step method.")
-        return jsonify(final_data)
-
-    except Exception as e:
-        logging.error(f"Critical error in 2-step process: {e}", exc_info=True)
-        return jsonify({"error": "System error calling AI."}), 500
+    final_data = {
+        "metadata": structured_data.get("metadata", {}),
+        "actionable_plan": structured_data.get("actionable_plan", {}),
+        "content": generated_content
+    }
+    logging.info("Prepared RAG draft using 2-step method.")
+    return jsonify(final_data)
 
 @app.route('/submit_rag_knowledge', methods=['POST'])
 def submit_rag_knowledge_api():
     if 'username' not in session: return jsonify({"error": "Not logged in"}), 401
-
-    # Receive the entire knowledge block from frontend
     knowledge_unit = request.json
     metadata = knowledge_unit.get('metadata', {})
     content = knowledge_unit.get('content', '').strip()
-
     if not content or not metadata.get('system_code') or not metadata.get('title'):
-        return jsonify({"error": "Title, Content, and System Code are required."}), 400
+        return jsonify({"error": "Missing required fields."}), 400
 
-    # Attach automatic metadata
     metadata['curator'] = session['username']
     metadata['source_session_id'] = session.get('active_session_id', 'unknown')
     metadata['curated_at'] = datetime.now(VIETNAM_TZ).isoformat()
-
-    # Update metadata in the knowledge block
     knowledge_unit['metadata'] = metadata
 
-    # Save the entire knowledge block as a YAML file
     rag_pending_user_dir = os.path.join(RAG_PENDING_DIR, session['username'])
     os.makedirs(rag_pending_user_dir, exist_ok=True)
-
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     sanitized_title = sanitize_filename(metadata.get('title', 'untitled'))
-    # Ensure filename is not too long
     filename = f"{sanitized_title[:50]}_{timestamp}.yml"
     filepath = os.path.join(rag_pending_user_dir, filename)
 
@@ -541,7 +525,7 @@ def submit_rag_knowledge_api():
         with open(filepath, "w", encoding="utf-8") as f:
             yaml.dump(knowledge_unit, f, allow_unicode=True, sort_keys=False, indent=2)
         logging.info(f"User '{session['username']}' contributed RAG knowledge: {filename}")
-        return jsonify({"status": "success", "message": "Knowledge contribution successful!"})
+        return jsonify({"status": "success"})
     except Exception as e:
         logging.error(f"Error saving RAG knowledge: {e}", exc_info=True)
         return jsonify({"error": "System error saving file."}), 500
@@ -549,7 +533,6 @@ def submit_rag_knowledge_api():
 # ===================== HÀM KHỞI TẠO ỨNG DỤNG =====================
 def initialize_app():
     logging.info("--- Starting application initialization process ---")
-
     for path in [os.path.dirname(USERS_FILE), HISTORY_BASE_DIR, RAG_PENDING_DIR, VECTOR_STORE_DIR]:
         os.makedirs(path, exist_ok=True)
         logging.info(f"Checked/created directory: {path}")
@@ -559,11 +542,11 @@ def initialize_app():
         default_username, default_password = "admin", secrets.token_urlsafe(12)
         salt = secrets.token_hex(16)
         password_hash = hash_password(default_password, salt)
-        default_user = [{"username": default_username, "password_hash": password_hash, "salt": salt}]
-        with open(USERS_FILE, "w", encoding="utf-8") as f: json.dump(default_user, f, indent=2)
+        with open(USERS_FILE, "w", encoding="utf-8") as f:
+            json.dump([{"username": default_username, "password_hash": password_hash, "salt": salt}], f, indent=2)
         logging.info("✅ Successfully created users.json file.")
         print("="*60, "\n!!! FIRST-TIME LOGIN INFORMATION !!!", f"\n    Username: {default_username}", f"\n    Password: {default_password}", "\n" + "="*60)
-
+        
     load_vector_engine()
     logging.info("--- Initialization process complete ---")
 
